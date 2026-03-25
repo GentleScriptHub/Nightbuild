@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Train With Me</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Poppins', sans-serif;
+  margin: 0;
+  background: linear-gradient(to right, #1e1e1e, #2c2c2c);
+  color: white;
+}
+
+header {
+  text-align: center;
+  padding: 30px 15px;
+}
+
+header h1 {
+  font-size: 2rem;
+}
+
+header p {
+  font-size: 1rem;
+}
+
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 15px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+.card {
+  background: #fff;
+  color: #000;
+  padding: 20px;
+  border-radius: 15px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+input, button {
+  padding: 12px;
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 8px;
+  border: none;
+  font-size: 1rem;
+}
+
+button {
+  background: black;
+  color: white;
+  font-weight: bold;
+}
+
+button:hover {
+  background: #444;
+}
+
+footer {
+  text-align: center;
+  padding: 15px;
+  font-size: 0.9rem;
+}
+
+/* TABLET */
+@media (min-width: 600px) {
+  header h1 { font-size: 2.5rem; }
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* DESKTOP */
+@media (min-width: 900px) {
+  header h1 { font-size: 3rem; }
+  header p { font-size: 1.2rem; }
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💪 Train With Me</h1>
+  <p>Get stronger. Get confident. Start today.</p>
+</header>
+
+<div class="container">
+  <div class="grid">
+
+    <div class="card">
+      <h2>About Me</h2>
+      <p>I help people build strength, lose fat, and feel confident. Whether you're a beginner or experienced, I got you.</p>
+    </div>
+
+    <div class="card">
+      <h2>Book a Session</h2>
+      <form action="https://formsubmit.co/javonjoseph2004@gmail.com" method="POST" target="_blank">
+        <input type="text" name="name" placeholder="Your Name" required>
+        <input type="email" name="email" placeholder="Your Email" required>
+        <input type="date" name="date" required>
+        <input type="time" name="time" required>
+
+        <input type="hidden" name="_subject" value="New Booking Request!">
+        <input type="hidden" name="_captcha" value="false">
+        <input type="hidden" name="_next" value="thankyou.html">
+
+        <button type="submit">Book Now</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  © 2026 Train With Me | Built for your fitness journey
+</footer>
+
+</body>
+</html>
