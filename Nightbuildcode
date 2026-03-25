@@ -113,7 +113,7 @@ footer {
 
         <input type="hidden" name="_subject" value="New Booking Request!">
         <input type="hidden" name="_captcha" value="false">
-        <input type="hidden" name="_next" value="nightbuild.netlify.app">
+        <input type="hidden" name="_next" value="https://nightbuild.netlify.app">
 
         <button type="submit">Book Now</button>
       </form>
