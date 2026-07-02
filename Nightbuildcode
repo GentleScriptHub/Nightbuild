@@ -1,130 +1,967 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Train With Me</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
-<style>
-* { box-sizing: border-box; }
+-- The code you want to execute after the teleport happens (wrapped in brackets to make it a string)
+local teleportCode = [[
+    task.wait(2) 
+    print("Injecting Tuna Scripts...")
+    
+    -- Fixed the doubled loadstring URL
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/TunaScripts/Azren/refs/heads/main/Games"))()
+]]
 
-body {
-  font-family: 'Poppins', sans-serif;
-  margin: 0;
-  background: linear-gradient(to right, #1e1e1e, #2c2c2c);
-  color: white;
+-- Queue it for the next teleport
+if queue_on_teleport then
+    queue_on_teleport(teleportCode)
+    print("Tuna Scripts queued for teleport.")
+elseif syn and syn.queue_on_teleport then
+    syn.queue_on_teleport(teleportCode)
+    print("Tuna Scripts queued for teleport.")
+end
+-- Check if the executor supports the function before calling it
+if queue_on_teleport then
+    queue_on_teleport(teleportCode)
+    print("Script successfully queued for the next teleport.")
+elseif syn and syn.queue_on_teleport then
+    -- Fallback for older Synapse X syntax
+    syn.queue_on_teleport(teleportCode)
+    print("Script successfully queued for the next teleport.")
+else
+    warn("Your current executor does not support queue_on_teleport.")
+end
+
+--// Core Variables
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local localPlayer = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local cache = {}
+
+--// ESP Settings
+local bones = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"},
+    {"RightLowerArm", "RightHand"}, {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"}, {"UpperTorso", "LowerTorso"}, {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}, {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
 }
 
-header {
-  text-align: center;
-  padding: 30px 15px;
+local ESP_SETTINGS = {
+    BoxOutlineColor = Color3.new(0, 0, 0),
+    BoxColor = Color3.new(1, 1, 1),
+    NameColor = Color3.new(1, 1, 1),
+    HealthOutlineColor = Color3.new(0, 0, 0),
+    HealthHighColor = Color3.new(0, 1, 0),
+    HealthLowColor = Color3.new(1, 0, 0),
+    CharSize = Vector2.new(4, 6),
+    Teamcheck = false,
+    WallCheck = false,
+    Enabled = false,
+    ShowBox = false,
+    BoxType = "2D",
+    ShowName = false,
+    ShowHealth = false,
+    ShowDistance = false,
+    ShowSkeletons = false,
+    ShowTracer = false,
+    TracerColor = Color3.new(1, 1, 1), 
+    TracerThickness = 2,
+    SkeletonsColor = Color3.new(1, 1, 1),
+    TracerPosition = "Top",
 }
 
-header h1 {
-  font-size: 2rem;
+--// Custom Roblox Drawing API Emulator (Bulletproof for all executors)
+local CoreGui = game:GetService("CoreGui")
+local espGui = CoreGui:FindFirstChild("TunaESP_Render")
+if espGui then espGui:Destroy() end
+
+espGui = Instance.new("ScreenGui")
+espGui.Name = "TunaESP_Render"
+espGui.ResetOnSpawn = false
+espGui.IgnoreGuiInset = true
+local success = pcall(function() espGui.Parent = CoreGui end)
+if not success then espGui.Parent = localPlayer:WaitForChild("PlayerGui") end
+
+local function createDrawing(class, properties)
+    local realProps = {
+        Visible = false, ZIndex = 1, Transparency = 1, Color = Color3.new(1, 1, 1), Thickness = 1,
+        From = Vector2.new(0, 0), To = Vector2.new(0, 0), Position = Vector2.new(0, 0), Size = Vector2.new(0, 0), 
+        Text = "", Center = false, Outline = true, Filled = false
+    }
+
+    local inst, stroke
+    if class == "Line" then
+        inst = Instance.new("Frame")
+        inst.AnchorPoint = Vector2.new(0.5, 0.5)
+        inst.BorderSizePixel = 0
+    elseif class == "Square" then
+        inst = Instance.new("Frame")
+        inst.BackgroundTransparency = 1
+        inst.BorderSizePixel = 0
+        stroke = Instance.new("UIStroke")
+        stroke.LineJoinMode = Enum.LineJoinMode.Miter
+        stroke.Parent = inst
+    elseif class == "Text" then
+        inst = Instance.new("TextLabel")
+        inst.BackgroundTransparency = 1
+        inst.Font = Enum.Font.GothamBold
+        inst.TextXAlignment = Enum.TextXAlignment.Center
+        inst.TextYAlignment = Enum.TextYAlignment.Top
+        stroke = Instance.new("UIStroke")
+        stroke.Parent = inst
+    end
+
+    inst.Parent = espGui
+
+    local function update()
+        if not inst then return end
+        inst.Visible = realProps.Visible
+        if not realProps.Visible then return end
+
+        inst.ZIndex = realProps.ZIndex
+        if class == "Line" then
+            local center = (realProps.From + realProps.To) / 2
+            local dist = (realProps.To - realProps.From).Magnitude
+            local angle = math.atan2(realProps.To.Y - realProps.From.Y, realProps.To.X - realProps.From.X)
+            
+            inst.Position = UDim2.new(0, center.X, 0, center.Y)
+            inst.Size = UDim2.new(0, dist, 0, realProps.Thickness)
+            inst.Rotation = math.deg(angle)
+            inst.BackgroundColor3 = realProps.Color
+            inst.BackgroundTransparency = 1 - realProps.Transparency
+        elseif class == "Square" then
+            inst.Position = UDim2.new(0, realProps.Position.X, 0, realProps.Position.Y)
+            inst.Size = UDim2.new(0, typeof(realProps.Size) == "Vector2" and realProps.Size.X or 0, 0, typeof(realProps.Size) == "Vector2" and realProps.Size.Y or 0)
+            stroke.Color = realProps.Color
+            stroke.Thickness = realProps.Thickness
+            if realProps.Filled then
+                inst.BackgroundColor3 = realProps.Color
+                inst.BackgroundTransparency = 1 - realProps.Transparency
+            else
+                inst.BackgroundTransparency = 1
+            end
+        elseif class == "Text" then
+            inst.Text = realProps.Text
+            inst.TextSize = typeof(realProps.Size) == "number" and realProps.Size or 13
+            inst.TextColor3 = realProps.Color
+            stroke.Enabled = realProps.Outline
+            inst.TextTransparency = 1 - realProps.Transparency
+            stroke.Transparency = 1 - realProps.Transparency
+            
+            if realProps.Center then
+                inst.AnchorPoint = Vector2.new(0.5, 0)
+            else
+                inst.AnchorPoint = Vector2.new(0, 0)
+            end
+            inst.Position = UDim2.new(0, realProps.Position.X, 0, realProps.Position.Y)
+            inst.Size = UDim2.new(0, 0, 0, 0) 
+        end
+    end
+
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "_isDrawing" then return true end
+            if k == "Remove" then return function() if inst then inst:Destroy() inst = nil end end end
+            return realProps[k]
+        end,
+        __newindex = function(_, k, v)
+            if realProps[k] == v then return end
+            realProps[k] = v
+            update()
+        end
+    })
+
+    for k, v in pairs(properties) do proxy[k] = v end
+    return proxy
+end
+
+
+local function createEsp(player)
+    local esp = {
+        boxOutline = createDrawing("Square", {Color = ESP_SETTINGS.BoxOutlineColor, Thickness = 3, Filled = false}),
+        box = createDrawing("Square", {Color = ESP_SETTINGS.BoxColor, Thickness = 1, Filled = false}),
+        name = createDrawing("Text", {Color = ESP_SETTINGS.NameColor, Outline = true, Center = true, Size = 13}),
+        healthOutline = createDrawing("Line", {Thickness = 3, Color = ESP_SETTINGS.HealthOutlineColor}),
+        health = createDrawing("Line", {Thickness = 1}),
+        distance = createDrawing("Text", {Color = Color3.new(1, 1, 1), Size = 12, Outline = true, Center = true}),
+        tracer = createDrawing("Line", {Thickness = ESP_SETTINGS.TracerThickness, Color = ESP_SETTINGS.TracerColor, Transparency = 1}),
+        boxLines = {},
+    }
+    cache[player] = esp
+    cache[player]["skeletonlines"] = {}
+end
+
+local function isPlayerBehindWall(player)
+    local character = player.Character
+    if not character then return false end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    local rayDirection = (rootPart.Position - camera.CFrame.Position).Unit * (rootPart.Position - camera.CFrame.Position).Magnitude
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {localPlayer.Character, character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    local hit = workspace:Raycast(camera.CFrame.Position, rayDirection, raycastParams)
+    return hit ~= nil
+end
+
+local function removeEsp(player)
+    local esp = cache[player]
+    if not esp then return end
+    for _, drawing in pairs(esp) do
+        if type(drawing) == "table" then
+            if drawing._isDrawing then drawing:Remove() else
+                for _, line in ipairs(drawing) do
+                    if type(line) == "table" and line[1] and line[1]._isDrawing then line[1]:Remove() 
+                    elseif type(line) == "table" and line._isDrawing then line:Remove() end
+                end
+            end
+        end
+    end
+    cache[player] = nil
+end
+
+local function updateEsp()
+    for player, esp in pairs(cache) do
+        local character, team = player.Character, player.Team
+        if character and (not ESP_SETTINGS.Teamcheck or (team and team ~= localPlayer.Team)) then
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
+            local head = character:FindFirstChild("Head")
+            local humanoid = character:FindFirstChild("Humanoid")
+            local isBehindWall = ESP_SETTINGS.WallCheck and isPlayerBehindWall(player)
+            local shouldShow = not isBehindWall and ESP_SETTINGS.Enabled
+
+            if rootPart and head and humanoid and humanoid.Health > 0 and shouldShow then
+                local position, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+                if onScreen then
+                    local hrp2D = camera:WorldToViewportPoint(rootPart.Position)
+                    local charSize = (camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0)).Y - camera:WorldToViewportPoint(rootPart.Position + Vector3.new(0, 2.6, 0)).Y) / 2
+                    local boxSize = Vector2.new(math.floor(charSize * 1.8), math.floor(charSize * 1.9))
+                    local boxPosition = Vector2.new(math.floor(hrp2D.X - charSize * 1.8 / 2), math.floor(hrp2D.Y - charSize * 1.6 / 2))
+
+                    if ESP_SETTINGS.ShowName then
+                        esp.name.Visible = true
+                        esp.name.Text = string.lower(player.Name)
+                        esp.name.Position = Vector2.new(boxSize.X / 2 + boxPosition.X, boxPosition.Y - 16)
+                    else esp.name.Visible = false end
+
+                    if ESP_SETTINGS.ShowBox then
+                        if ESP_SETTINGS.BoxType == "2D" then
+                            esp.boxOutline.Size = boxSize; esp.boxOutline.Position = boxPosition
+                            esp.box.Size = boxSize; esp.box.Position = boxPosition
+                            esp.box.Visible = true; esp.boxOutline.Visible = true
+                            for _, line in ipairs(esp.boxLines) do if line._isDrawing then line.Visible = false end end
+                        elseif ESP_SETTINGS.BoxType == "Corner Box Esp" then
+                            esp.box.Visible = false; esp.boxOutline.Visible = false
+                            local lineW, lineH, lineT = (boxSize.X / 5), (boxSize.Y / 6), 1
+                            if #esp.boxLines == 0 then
+                                for i = 1, 16 do esp.boxLines[i] = createDrawing("Line", {Thickness = 1, Color = ESP_SETTINGS.BoxColor, Transparency = 1}) end
+                            end
+                            local bl = esp.boxLines
+                            bl[1].From = Vector2.new(boxPosition.X - lineT, boxPosition.Y - lineT); bl[1].To = Vector2.new(boxPosition.X + lineW, boxPosition.Y - lineT)
+                            bl[2].From = Vector2.new(boxPosition.X - lineT, boxPosition.Y - lineT); bl[2].To = Vector2.new(boxPosition.X - lineT, boxPosition.Y + lineH)
+                            bl[3].From = Vector2.new(boxPosition.X + boxSize.X - lineW, boxPosition.Y - lineT); bl[3].To = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y - lineT)
+                            bl[4].From = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y - lineT); bl[4].To = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y + lineH)
+                            bl[5].From = Vector2.new(boxPosition.X - lineT, boxPosition.Y + boxSize.Y - lineH); bl[5].To = Vector2.new(boxPosition.X - lineT, boxPosition.Y + boxSize.Y + lineT)
+                            bl[6].From = Vector2.new(boxPosition.X - lineT, boxPosition.Y + boxSize.Y + lineT); bl[6].To = Vector2.new(boxPosition.X + lineW, boxPosition.Y + boxSize.Y + lineT)
+                            bl[7].From = Vector2.new(boxPosition.X + boxSize.X - lineW, boxPosition.Y + boxSize.Y + lineT); bl[7].To = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y + boxSize.Y + lineT)
+                            bl[8].From = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y + boxSize.Y - lineH); bl[8].To = Vector2.new(boxPosition.X + boxSize.X + lineT, boxPosition.Y + boxSize.Y + lineT)
+                            for i = 9, 16 do bl[i].Thickness = 2; bl[i].Color = ESP_SETTINGS.BoxOutlineColor end
+                            bl[9].From = Vector2.new(boxPosition.X, boxPosition.Y); bl[9].To = Vector2.new(boxPosition.X, boxPosition.Y + lineH)
+                            bl[10].From = Vector2.new(boxPosition.X, boxPosition.Y); bl[10].To = Vector2.new(boxPosition.X + lineW, boxPosition.Y)
+                            bl[11].From = Vector2.new(boxPosition.X + boxSize.X - lineW, boxPosition.Y); bl[11].To = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y)
+                            bl[12].From = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y); bl[12].To = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y + lineH)
+                            bl[13].From = Vector2.new(boxPosition.X, boxPosition.Y + boxSize.Y - lineH); bl[13].To = Vector2.new(boxPosition.X, boxPosition.Y + boxSize.Y)
+                            bl[14].From = Vector2.new(boxPosition.X, boxPosition.Y + boxSize.Y); bl[14].To = Vector2.new(boxPosition.X + lineW, boxPosition.Y + boxSize.Y)
+                            bl[15].From = Vector2.new(boxPosition.X + boxSize.X - lineW, boxPosition.Y + boxSize.Y); bl[15].To = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y + boxSize.Y)
+                            bl[16].From = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y + boxSize.Y - lineH); bl[16].To = Vector2.new(boxPosition.X + boxSize.X, boxPosition.Y + boxSize.Y)
+                            for _, line in ipairs(bl) do line.Visible = true end
+                        end
+                    else
+                        esp.box.Visible = false; esp.boxOutline.Visible = false
+                        for _, line in ipairs(esp.boxLines) do if line._isDrawing then line.Visible = false end end
+                    end
+
+                    if ESP_SETTINGS.ShowHealth then
+                        esp.healthOutline.Visible = true; esp.health.Visible = true
+                        local maxHealth = math.max(humanoid.MaxHealth, 1)
+                        local healthPercentage = math.clamp(humanoid.Health / maxHealth, 0, 1)
+                        esp.healthOutline.From = Vector2.new(boxPosition.X - 6, boxPosition.Y + boxSize.Y)
+                        esp.healthOutline.To = Vector2.new(esp.healthOutline.From.X, esp.healthOutline.From.Y - boxSize.Y)
+                        esp.health.From = Vector2.new((boxPosition.X - 5), boxPosition.Y + boxSize.Y)
+                        esp.health.To = Vector2.new(esp.health.From.X, esp.health.From.Y - healthPercentage * boxSize.Y)
+                        esp.health.Color = ESP_SETTINGS.HealthLowColor:Lerp(ESP_SETTINGS.HealthHighColor, healthPercentage)
+                    else esp.healthOutline.Visible = false; esp.health.Visible = false end
+
+                    if ESP_SETTINGS.ShowDistance then
+                        local distance = (camera.CFrame.p - rootPart.Position).Magnitude
+                        esp.distance.Text = string.format("%.1f studs", distance)
+                        esp.distance.Position = Vector2.new(boxPosition.X + boxSize.X / 2, boxPosition.Y + boxSize.Y + 5)
+                        esp.distance.Visible = true
+                    else esp.distance.Visible = false end
+
+                    if ESP_SETTINGS.ShowSkeletons then
+                        if #esp["skeletonlines"] == 0 then
+                            for _, bonePair in ipairs(bones) do
+                                local parentBone, childBone = bonePair[1], bonePair[2]
+                                if character:FindFirstChild(parentBone) and character:FindFirstChild(childBone) then
+                                    local skeletonLine = createDrawing("Line", {Thickness = 1, Color = ESP_SETTINGS.SkeletonsColor, Transparency = 1})
+                                    esp["skeletonlines"][#esp["skeletonlines"] + 1] = {skeletonLine, parentBone, childBone}
+                                end
+                            end
+                        end
+                        for _, lineData in ipairs(esp["skeletonlines"]) do
+                            local skeletonLine, parentBone, childBone = lineData[1], lineData[2], lineData[3]
+                            if character:FindFirstChild(parentBone) and character:FindFirstChild(childBone) then
+                                local parentPosition, parentOnScreen = camera:WorldToViewportPoint(character[parentBone].Position)
+                                local childPosition, childOnScreen = camera:WorldToViewportPoint(character[childBone].Position)
+                                if parentOnScreen and childOnScreen then
+                                    skeletonLine.From = Vector2.new(parentPosition.X, parentPosition.Y)
+                                    skeletonLine.To = Vector2.new(childPosition.X, childPosition.Y)
+                                    skeletonLine.Visible = true
+                                else skeletonLine.Visible = false end
+                            else skeletonLine.Visible = false end
+                        end
+                    else
+                        for _, lineData in ipairs(esp["skeletonlines"]) do if lineData[1] and lineData[1]._isDrawing then lineData[1].Visible = false end end
+                    end                    
+
+                    if ESP_SETTINGS.ShowTracer then
+                        local tracerY = ESP_SETTINGS.TracerPosition == "Top" and 0 or (ESP_SETTINGS.TracerPosition == "Middle" and camera.ViewportSize.Y / 2 or camera.ViewportSize.Y)
+                        esp.tracer.Visible = true
+                        esp.tracer.From = Vector2.new(camera.ViewportSize.X / 2, tracerY)
+                        esp.tracer.To = Vector2.new(hrp2D.X, hrp2D.Y)            
+                    else esp.tracer.Visible = false end
+                else
+                    for _, drawing in pairs(esp) do if type(drawing) == "table" and drawing._isDrawing then drawing.Visible = false end end
+                    for _, line in ipairs(esp.boxLines) do if type(line) == "table" and line._isDrawing then line.Visible = false end end
+                    for _, lineData in ipairs(esp["skeletonlines"]) do if lineData[1] and lineData[1]._isDrawing then lineData[1].Visible = false end end
+                end
+            else
+                for _, drawing in pairs(esp) do if type(drawing) == "table" and drawing._isDrawing then drawing.Visible = false end end
+                for _, line in ipairs(esp.boxLines) do if type(line) == "table" and line._isDrawing then line.Visible = false end end
+                for _, lineData in ipairs(esp["skeletonlines"]) do if lineData[1] and lineData[1]._isDrawing then lineData[1].Visible = false end end
+            end
+        else
+            for _, drawing in pairs(esp) do if type(drawing) == "table" and drawing._isDrawing then drawing.Visible = false end end
+            for _, line in ipairs(esp.boxLines) do if type(line) == "table" and line._isDrawing then line.Visible = false end end
+            for _, lineData in ipairs(esp["skeletonlines"]) do if lineData[1] and lineData[1]._isDrawing then lineData[1].Visible = false end end
+        end
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then createEsp(player) end
+end
+Players.PlayerAdded:Connect(function(player)
+    if player ~= localPlayer then createEsp(player) end
+end)
+Players.PlayerRemoving:Connect(removeEsp)
+RunService.RenderStepped:Connect(updateEsp)
+
+--// Aimbot & Misc Logic
+local aimbotEnabled = false
+local aimAtPart = "HumanoidRootPart"
+local wallCheckEnabled = false
+local teamCheckEnabled = false
+
+local function getClosestTarget()
+    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local localRoot = character:WaitForChild("HumanoidRootPart")
+    local nearestTarget, shortestDistance = nil, math.huge
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and (not teamCheckEnabled or player.Team ~= localPlayer.Team) then
+            local target = player.Character
+            if target and target:IsA("Model") and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 and target:FindFirstChild(aimAtPart) then
+                local targetRoot = target[aimAtPart]
+                local distance = (targetRoot.Position - localRoot.Position).Magnitude
+                if distance < shortestDistance then
+                    if wallCheckEnabled then
+                        local rayDirection = (targetRoot.Position - camera.CFrame.Position).Unit * 1000
+                        local raycastParams = RaycastParams.new()
+                        raycastParams.FilterDescendantsInstances = {character}
+                        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+                        local hit = workspace:Raycast(camera.CFrame.Position, rayDirection, raycastParams)
+                        if hit and hit.Instance:IsDescendantOf(target) then
+                            shortestDistance = distance
+                            nearestTarget = target
+                        end
+                    else
+                        shortestDistance = distance
+                        nearestTarget = target
+                    end
+                end
+            end
+        end
+    end
+    return nearestTarget
+end
+
+local aimbotConnection
+local function aimAtTarget()
+    if aimbotConnection then aimbotConnection:Disconnect() end
+    aimbotConnection = RunService.RenderStepped:Connect(function()
+        if not aimbotEnabled then aimbotConnection:Disconnect() return end
+        local closestTarget = getClosestTarget()
+        if closestTarget and closestTarget:FindFirstChild(aimAtPart) then
+            camera.CFrame = CFrame.new(camera.CFrame.Position, closestTarget[aimAtPart].Position)
+        end
+    end)
+end
+
+local IJ = false
+UserInputService.JumpRequest:Connect(function()
+    if IJ and localPlayer.Character and localPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        localPlayer.Character:FindFirstChildOfClass('Humanoid'):ChangeState("Jumping")
+    end
+end)
+
+local walkSpeedActive, customWalkSpeed = false, 16
+RunService.Stepped:Connect(function()
+    if walkSpeedActive and localPlayer.Character and localPlayer.Character:FindFirstChildOfClass('Humanoid') then
+        localPlayer.Character:FindFirstChildOfClass('Humanoid').WalkSpeed = customWalkSpeed
+    end
+end)
+
+
+--// UI FRAMEWORK (Tuna Scripts)
+local CoreGui = game:GetService("CoreGui")
+if getgenv().TunaUI then getgenv().TunaUI:Destroy() end
+
+local Theme = {
+    Background = Color3.fromRGB(20, 20, 25), Sidebar = Color3.fromRGB(15, 15, 20),
+    Element = Color3.fromRGB(30, 30, 38), Hover = Color3.fromRGB(40, 40, 50),
+    Accent = Color3.fromRGB(0, 200, 255), AccentDark = Color3.fromRGB(150, 50, 255),
+    Text = Color3.fromRGB(240, 240, 240), TextDim = Color3.fromRGB(180, 180, 180),
+    ToggleOff = Color3.fromRGB(50, 50, 60), ToggleOn = Color3.fromRGB(0, 200, 255)
 }
 
-header p {
-  font-size: 1rem;
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TunaScripts_SpeedEvolve"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+getgenv().TunaUI = ScreenGui
+local success = pcall(function() ScreenGui.Parent = CoreGui end)
+if not success then ScreenGui.Parent = localPlayer:WaitForChild("PlayerGui") end
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 600, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
+MainFrame.BackgroundColor3 = Theme.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Theme.Accent
+MainStroke.Thickness = 1
+MainStroke.Transparency = 0.5
+MainStroke.Parent = MainFrame
+local StrokeGradient = Instance.new("UIGradient")
+StrokeGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Theme.Accent), ColorSequenceKeypoint.new(0.5, Theme.AccentDark), ColorSequenceKeypoint.new(1, Theme.Accent)
+})
+StrokeGradient.Parent = MainStroke
+
+task.spawn(function()
+    local rot = 0
+    while task.wait(0.02) do
+        rot = (rot + 1) % 360
+        if StrokeGradient and StrokeGradient.Parent then StrokeGradient.Rotation = rot else break end
+    end
+end)
+
+local dragging, dragInput2, dragStart2, startPos2
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart2 = input.Position; startPos2 = MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput2 = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput2 and dragging then
+        local delta = input.Position - dragStart2
+        TweenService:Create(MainFrame, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(startPos2.X.Scale, startPos2.X.Offset + delta.X, startPos2.Y.Scale, startPos2.Y.Offset + delta.Y)}):Play()
+    end
+end)
+
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 160, 1, 0)
+Sidebar.BackgroundColor3 = Theme.Sidebar
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = MainFrame
+
+local STitle = Instance.new("TextLabel")
+STitle.Size = UDim2.new(1, 0, 0, 50)
+STitle.BackgroundTransparency = 1
+STitle.Text = "🐟 TUNA SCRIPTS"
+STitle.TextColor3 = Theme.Text
+STitle.Font = Enum.Font.GothamBlack
+STitle.TextSize = 16
+STitle.Parent = Sidebar
+Instance.new("UIGradient", STitle).Color = StrokeGradient.Color
+
+local TabContainer = Instance.new("ScrollingFrame")
+TabContainer.Size = UDim2.new(1, 0, 1, -60)
+TabContainer.Position = UDim2.new(0, 0, 0, 50)
+TabContainer.BackgroundTransparency = 1
+TabContainer.ScrollBarThickness = 0
+TabContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+TabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+TabContainer.Parent = Sidebar
+local TabListLayout = Instance.new("UIListLayout")
+TabListLayout.Padding = UDim.new(0, 5)
+TabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabListLayout.Parent = TabContainer
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -160, 1, 0)
+ContentArea.Position = UDim2.new(0, 160, 0, 0)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 10)
+CloseBtn.BackgroundColor3 = Theme.Element
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Theme.TextDim
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 12
+CloseBtn.Parent = ContentArea
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+CloseBtn.MouseEnter:Connect(function() TweenService:Create(CloseBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(255, 60, 60), TextColor3 = Color3.new(1,1,1)}):Play() end)
+CloseBtn.MouseLeave:Connect(function() TweenService:Create(CloseBtn, TweenInfo.new(0.2), {BackgroundColor3 = Theme.Element, TextColor3 = Theme.TextDim}):Play() end)
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+local NotificationHolder = Instance.new("Frame")
+NotificationHolder.Size = UDim2.new(0, 320, 1, 0)
+NotificationHolder.Position = UDim2.new(1, -330, 0, 10)
+NotificationHolder.BackgroundTransparency = 1
+NotificationHolder.Parent = ScreenGui
+local NotificationList = Instance.new("UIListLayout")
+NotificationList.Padding = UDim.new(0, 10)
+NotificationList.HorizontalAlignment = Enum.HorizontalAlignment.Right
+NotificationList.VerticalAlignment = Enum.VerticalAlignment.Top
+NotificationList.Parent = NotificationHolder
+
+local function sendNotification(title, text, duration, color)
+    local notif = Instance.new("Frame")
+    notif.Size = UDim2.new(0, 300, 0, 60)
+    notif.Position = UDim2.new(0, 320, 0, 0)
+    notif.BackgroundColor3 = color or Theme.Element
+    notif.BorderSizePixel = 0
+    notif.ClipsDescendants = true
+    notif.Parent = NotificationHolder
+    Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 6)
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -20, 0, 20)
+    titleLabel.Position = UDim2.new(0, 10, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 14
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = notif
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, -20, 0, 20)
+    textLabel.Position = UDim2.new(0, 10, 0, 30)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = text
+    textLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    textLabel.Font = Enum.Font.Gotham
+    textLabel.TextSize = 12
+    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+    textLabel.Parent = notif
+    TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0)}):Play()
+    task.delay(duration or 3, function()
+        if notif and notif.Parent then
+            local removeTween = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(0, 320, 0, 0)})
+            removeTween:Play()
+            removeTween.Completed:Connect(function() notif:Destroy() end)
+        end
+    end)
+end
+
+local Tabs = {}
+local function CreateTab(name, isDefault)
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Size = UDim2.new(0, 140, 0, 35)
+    TabBtn.BackgroundTransparency = 1
+    TabBtn.Text = name
+    TabBtn.TextColor3 = isDefault and Theme.Accent or Theme.TextDim
+    TabBtn.Font = Enum.Font.GothamBold
+    TabBtn.TextSize = 13
+    TabBtn.Parent = TabContainer
+    local Indicator = Instance.new("Frame")
+    Indicator.Size = UDim2.new(0, 3, 0, isDefault and 20 or 0)
+    Indicator.Position = UDim2.new(0, 0, 0.5, isDefault and -10 or 0)
+    Indicator.BackgroundColor3 = Theme.Accent
+    Indicator.BorderSizePixel = 0
+    Indicator.Parent = TabBtn
+    Instance.new("UICorner", Indicator).CornerRadius = UDim.new(1, 0)
+    local Page = Instance.new("ScrollingFrame")
+    Page.Size = UDim2.new(1, -20, 1, -50)
+    Page.Position = UDim2.new(0, 10, 0, 40)
+    Page.BackgroundTransparency = 1
+    Page.ScrollBarThickness = 2
+    Page.ScrollBarImageColor3 = Theme.Accent
+    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Page.Visible = isDefault
+    Page.Parent = ContentArea
+    local PageLayout = Instance.new("UIListLayout")
+    PageLayout.Padding = UDim.new(0, 8)
+    PageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    PageLayout.Parent = Page
+    Tabs[name] = {Button = TabBtn, Page = Page, Indicator = Indicator}
+    TabBtn.MouseButton1Click:Connect(function()
+        for tName, data in pairs(Tabs) do
+            data.Page.Visible = (tName == name)
+            TweenService:Create(data.Button, TweenInfo.new(0.3), {TextColor3 = (tName == name) and Theme.Accent or Theme.TextDim}):Play()
+            TweenService:Create(data.Indicator, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 3, 0, (tName == name) and 20 or 0), Position = UDim2.new(0, 0, 0.5, (tName == name) and -10 or 0)}):Play()
+        end
+    end)
+    return Page
+end
+
+local function CreateSection(parent, text)
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -10, 0, 25)
+    Label.BackgroundTransparency = 1
+    Label.Text = "  " .. text
+    Label.TextColor3 = Theme.Accent
+    Label.Font = Enum.Font.GothamBold
+    Label.TextSize = 14
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = parent
+end
+
+local function CreateLabel(parent, text)
+    local LabelFrame = Instance.new("Frame", parent)
+    LabelFrame.Size = UDim2.new(1, -10, 0, 30)
+    LabelFrame.BackgroundTransparency = 1
+    
+    local Label = Instance.new("TextLabel", LabelFrame)
+    Label.Size = UDim2.new(1, -20, 1, 0)
+    Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.TextColor3 = Theme.TextDim
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    return Label
+end
+
+local function CreateToggle(parent, text, state, callback)
+    local ToggleFrame = Instance.new("Frame")
+    ToggleFrame.Size = UDim2.new(1, -10, 0, 45)
+    ToggleFrame.BackgroundColor3 = Theme.Element
+    ToggleFrame.Parent = parent
+    Instance.new("UICorner", ToggleFrame).CornerRadius = UDim.new(0, 8)
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -70, 1, 0)
+    Label.Position = UDim2.new(0, 15, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.TextColor3 = Theme.Text
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 14
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = ToggleFrame
+    local Pill = Instance.new("TextButton")
+    Pill.Size = UDim2.new(0, 44, 0, 22)
+    Pill.Position = UDim2.new(1, -55, 0.5, -11)
+    Pill.BackgroundColor3 = state and Theme.ToggleOn or Theme.ToggleOff
+    Pill.Text = ""
+    Pill.AutoButtonColor = false
+    Pill.Parent = ToggleFrame
+    Instance.new("UICorner", Pill).CornerRadius = UDim.new(1, 0)
+    local Circle = Instance.new("Frame")
+    Circle.Size = UDim2.new(0, 18, 0, 18)
+    Circle.Position = UDim2.new(0, state and 24 or 2, 0.5, -9)
+    Circle.BackgroundColor3 = Color3.new(1, 1, 1)
+    Circle.Parent = Pill
+    Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
+    local isToggled = state
+    Pill.MouseButton1Click:Connect(function()
+        isToggled = not isToggled
+        TweenService:Create(Pill, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {BackgroundColor3 = isToggled and Theme.ToggleOn or Theme.ToggleOff}):Play()
+        TweenService:Create(Circle, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.new(0, isToggled and 24 or 2, 0.5, -9)}):Play()
+        callback(isToggled)
+    end)
+end
+
+local function CreateButton(parent, text, callback)
+    local BtnFrame = Instance.new("Frame", parent)
+    BtnFrame.Size = UDim2.new(1, -10, 0, 45)
+    BtnFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    Instance.new("UICorner", BtnFrame).CornerRadius = UDim.new(0, 8)
+    local Btn = Instance.new("TextButton", BtnFrame)
+    Btn.Size = UDim2.new(1, 0, 1, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.Text = text
+    Btn.TextColor3 = Color3.fromRGB(240, 240, 240)
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.TextSize = 14
+    Btn.MouseButton1Click:Connect(callback)
+end
+
+local function CreateSlider(parent, text, min, max, default, callback)
+    local SliderFrame = Instance.new("Frame", parent)
+    SliderFrame.Size = UDim2.new(1, -10, 0, 55)
+    SliderFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    Instance.new("UICorner", SliderFrame).CornerRadius = UDim.new(0, 8)
+    local Label = Instance.new("TextLabel", SliderFrame)
+    Label.Size = UDim2.new(1, -30, 0, 20)
+    Label.Position = UDim2.new(0, 15, 0, 5)
+    Label.BackgroundTransparency = 1
+    Label.Text = text .. ": " .. default
+    Label.TextColor3 = Color3.fromRGB(240, 240, 240)
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 14
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    local Track = Instance.new("Frame", SliderFrame)
+    Track.Size = UDim2.new(1, -30, 0, 6)
+    Track.Position = UDim2.new(0, 15, 0, 35)
+    Track.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    Instance.new("UICorner", Track).CornerRadius = UDim.new(1, 0)
+    local Fill = Instance.new("Frame", Track)
+    Fill.Size = UDim2.new(math.clamp((default - min)/(max - min), 0, 1), 0, 1, 0)
+    Fill.BackgroundColor3 = Theme.Accent
+    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+    local Btn = Instance.new("TextButton", Track)
+    Btn.Size = UDim2.new(1, 0, 1, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.Text = ""
+    local dragging = false
+    local function update(input)
+        local pos = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+        Fill.Size = UDim2.new(pos, 0, 1, 0)
+        local val = min + ((max - min) * pos)
+        if (max - min) <= 10 then val = math.floor(val * 10) / 10 else val = math.floor(val) end
+        Label.Text = text .. ": " .. tostring(val)
+        callback(val)
+    end
+    Btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; update(input) end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+end
+
+local function CreateDropdown(parent, text, options, callback)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(1, -10, 0, 45)
+    Frame.BackgroundColor3 = Theme.Element
+    Frame.ClipsDescendants = true
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 8)
+    local Header = Instance.new("Frame", Frame)
+    Header.Size = UDim2.new(1, 0, 0, 45)
+    Header.BackgroundTransparency = 1
+    Header.LayoutOrder = 0
+    local Label = Instance.new("TextLabel", Header)
+    Label.Size = UDim2.new(1, -40, 1, 0)
+    Label.Position = UDim2.new(0, 15, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text .. ": " .. tostring(options[1])
+    Label.TextColor3 = Theme.Text
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextSize = 14
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    local ToggleBtn = Instance.new("TextButton", Header)
+    ToggleBtn.Size = UDim2.new(1, 0, 1, 0)
+    ToggleBtn.BackgroundTransparency = 1
+    ToggleBtn.Text = ""
+    local Layout = Instance.new("UIListLayout", Frame)
+    Layout.Padding = UDim.new(0, 4)
+    Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    local open = false
+    ToggleBtn.MouseButton1Click:Connect(function()
+        open = not open
+        local targetHeight = open and (45 + (#options * 34) + 5) or 45
+        TweenService:Create(Frame, TweenInfo.new(0.2), {Size = UDim2.new(1, -10, 0, targetHeight)}):Play()
+    end)
+    for i, opt in ipairs(options) do
+        local OptBtn = Instance.new("TextButton", Frame)
+        OptBtn.Size = UDim2.new(1, -20, 0, 30)
+        OptBtn.BackgroundColor3 = Theme.Hover
+        OptBtn.Text = tostring(opt)
+        OptBtn.TextColor3 = Theme.TextDim
+        OptBtn.Font = Enum.Font.Gotham
+        OptBtn.TextSize = 13
+        OptBtn.LayoutOrder = i
+        Instance.new("UICorner", OptBtn).CornerRadius = UDim.new(0, 4)
+        OptBtn.MouseButton1Click:Connect(function()
+            Label.Text = text .. ": " .. tostring(opt)
+            open = false
+            TweenService:Create(Frame, TweenInfo.new(0.2), {Size = UDim2.new(1, -10, 0, 45)}):Play()
+            callback(opt)
+        end)
+    end
+end
+
+-- ==========================================
+-- CONFIGURATION SYSTEM (SAVE & LOAD)
+-- ==========================================
+local ConfigFolder = "TunaScripts"
+local ConfigFile = ConfigFolder .. "/AzrenConfig.json"
+
+local TunaConfig = {
+    Aimbot = false,
+    SilentAim = false,
+    AutoClicker = false,
+    WallCheck = false,
+    TeamCheck = false,
+    AimPart = "HumanoidRootPart",
+    
+    EspMaster = false,
+    EspBox = false,
+    EspName = false,
+    EspHealth = false,
+    EspDistance = false,
+    EspSkeleton = false,
+    EspTracer = false,
+    
+    InfJump = false,
+    WalkSpeed = false,
+    WalkSpeedValue = 16
 }
 
-.container {
-  max-width: 1100px;
-  margin: auto;
-  padding: 15px;
-}
+local function SaveSettings()
+    if not isfolder(ConfigFolder) then makefolder(ConfigFolder) end
+    writefile(ConfigFile, HttpService:JSONEncode(TunaConfig))
+end
 
-.grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
+local function LoadSettings()
+    if isfile(ConfigFile) then
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile(ConfigFile)) end)
+        if success and data then
+            for key, value in pairs(data) do
+                TunaConfig[key] = value
+            end
+        end
+    end
+end
 
-.card {
-  background: #fff;
-  color: #000;
-  padding: 20px;
-  border-radius: 15px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-}
+-- Load the settings from the hard drive right before we build the UI
+LoadSettings()
+-- ==========================================
+-- UI INITIALIZATION & LOGIC BINDING
+-- ==========================================
 
-input, button {
-  padding: 12px;
-  width: 100%;
-  margin-top: 10px;
-  border-radius: 8px;
-  border: none;
-  font-size: 1rem;
-}
+local AimbotTab = CreateTab("Aimbot", true)
+local EspTab = CreateTab("ESP Visuals", false)
+local MiscTab = CreateTab("Misc", false)
 
-button {
-  background: black;
-  color: white;
-  font-weight: bold;
-}
+-- Aimbot Tab
+CreateSection(AimbotTab, "Combat")
+local silentAimLoaded = false
 
-button:hover {
-  background: #444;
-}
+CreateToggle(AimbotTab, "Silent Aim (by Bolts)", false, function(state)
+    -- We set common global variables here. If the external script supports being 
+    -- toggled off, it will usually listen to one of these variables.
+    if getgenv() then
+        getgenv().SilentAim = state
+        getgenv().SilentAimEnabled = state
+        getgenv().SilentAimToggle = state
+    end
+    
+    if state and not silentAimLoaded then
+        -- Load it for the first time
+        local success, err = pcall(function()
+            loadstring(game:HttpGet('https://raw.githubusercontent.com/ThunderScriptSolutions/Misc/refs/heads/main/RivalsSilentAim'))()
+        end)
+        
+        if success then
+            silentAimLoaded = true
+            sendNotification("Silent Aim", "Script executed and enabled!", 3, Color3.fromRGB(0, 200, 255))
+        else
+            sendNotification("Error", "Failed to load Silent Aim.", 3, Color3.fromRGB(255, 60, 60))
+        end
+    elseif state and silentAimLoaded then
+        sendNotification("Silent Aim", "Silent Aim Enabled", 2, Theme.ToggleOn)
+    else
+        sendNotification("Silent Aim", "Silent Aim Disabled (If supported)", 2, Theme.TextDim)
+    end
+end)
 
-footer {
-  text-align: center;
-  padding: 15px;
-  font-size: 0.9rem;
-}
+--// Auto-Clicker Hip-Fire Bypass
+CreateSection(AimbotTab, "Bypasses")
 
-/* TABLET */
-@media (min-width: 600px) {
-  header h1 { font-size: 2.5rem; }
-  .grid { grid-template-columns: 1fr 1fr; }
-}
+local autoClickerEnabled = false
+local holdingMouse = false
 
-/* DESKTOP */
-@media (min-width: 900px) {
-  header h1 { font-size: 3rem; }
-  header p { font-size: 1.2rem; }
-  .grid { grid-template-columns: 1fr 1fr; }
-}
+CreateToggle(AimbotTab, "Hip-Fire Auto-Clicker (Fix)", false, function(state)
+    autoClickerEnabled = state
+end)
 
-</style>
-</head>
-<body>
+-- Detect when the user holds or releases Left Click
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.UserInputType == Enum.UserInputType.MouseButton1 then
+        holdingMouse = true
+    end
+end)
 
-<header>
-  <h1>💪 Train With Me</h1>
-  <p>Get stronger. Get confident. Start today.</p>
-</header>
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        holdingMouse = false
+    end
+end)
 
-<div class="container">
-  <div class="grid">
+-- Rapidly spam clicks while the button is held down
+task.spawn(function()
+    while task.wait(0.02) do -- Adjust this number (e.g., 0.05) if it shoots too fast/lags
+        if autoClickerEnabled and holdingMouse then
+            if mouse1click then
+                mouse1click()
+            end
+        end
+    end
+end)
 
-    <div class="card">
-      <h2>About Me</h2>
-      <p>I help people build strength, lose fat, and feel confident. Whether you're a beginner or experienced, I got you.</p>
-    </div>
+CreateSection(AimbotTab, "Aimtbot")
+CreateToggle(AimbotTab, "Enable Aimbot", false, function(state)
+    aimbotEnabled = state
+    if aimbotEnabled then aimAtTarget() end
+end)
+CreateDropdown(AimbotTab, "Aim Part", {"HumanoidRootPart", "Head"}, function(val)
+    aimAtPart = val
+    sendNotification("Aim Part", "Now targeting: " .. val, 3)
+end)
 
-    <div class="card">
-      <h2>Book a Session</h2>
-      <form action="https://formsubmit.co/javonjoseph2004@gmail.com" method="POST" target="_blank">
-        <input type="text" name="name" placeholder="Your Name" required>
-        <input type="email" name="email" placeholder="Your Email" required>
-        <input type="date" name="date" required>
-        <input type="time" name="time" required>
+CreateSection(AimbotTab, "Checkers")
+CreateToggle(AimbotTab, "Wall Check", false, function(state) wallCheckEnabled = state end)
+CreateToggle(AimbotTab, "Team Check", false, function(state) teamCheckEnabled = state end)
 
-        <input type="hidden" name="_subject" value="New Booking Request!">
-        <input type="hidden" name="_captcha" value="false">
-        <input type="hidden" name="_next" value="https://nightbuild.netlify.app">
+-- ESP Tab
+CreateSection(EspTab, "Visual Toggles")
+CreateToggle(EspTab, "Enable ESP Master", false, function(state) ESP_SETTINGS.Enabled = state end)
+CreateToggle(EspTab, "ESP Box", false, function(state) ESP_SETTINGS.ShowBox = state end)
+CreateDropdown(EspTab, "ESP Box Type", {"2D", "Corner Box Esp"}, function(val) ESP_SETTINGS.BoxType = val end)
+CreateToggle(EspTab, "ESP Name", false, function(state) ESP_SETTINGS.ShowName = state end)
+CreateToggle(EspTab, "ESP Health", false, function(state) ESP_SETTINGS.ShowHealth = state end)
+CreateToggle(EspTab, "ESP Distance", false, function(state) ESP_SETTINGS.ShowDistance = state end)
+CreateToggle(EspTab, "ESP Skeleton", false, function(state) ESP_SETTINGS.ShowSkeletons = state end)
+CreateToggle(EspTab, "ESP Tracer", false, function(state) ESP_SETTINGS.ShowTracer = state end)
+CreateDropdown(EspTab, "Tracer Position", {"Top", "Middle", "Bottom"}, function(val) ESP_SETTINGS.TracerPosition = val end)
+CreateToggle(EspTab, "ESP Team Check", false, function(state) ESP_SETTINGS.Teamcheck = state end)
 
-        <button type="submit">Book Now</button>
-      </form>
-    </div>
+-- Misc Tab
+CreateSection(MiscTab, "Player Modifications")
+CreateToggle(MiscTab, "Infinite Jump", false, function(state) IJ = state end)
+CreateToggle(MiscTab, "Enable WalkSpeed", false, function(state) walkSpeedActive = state end)
+CreateSlider(MiscTab, "WalkSpeed Adjust", 16, 150, 16, function(val) customWalkSpeed = val end)
 
-  </div>
-</div>
-
-<footer>
-  © 2026 Train With Me | Built for your fitness journey
-</footer>
-
-</body>
-</html>
+CreateSection(MiscTab, "Information")
+CreateLabel(MiscTab, "Script Author: Azren")
+CreateLabel(MiscTab, "UI Framework: Tuna Scripts V2")
